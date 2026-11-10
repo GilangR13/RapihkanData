@@ -2,7 +2,9 @@ import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { RULES, transformCell } from './cleaner.js';
+import { cleanConfiguredText, splitNisNisn, splitBirthPlaceDate, parseCorrectionDictionary } from './indonesia.js';
 import './style.css';
+import './columns.css';
 
 const els = {
   dropzone: document.querySelector('#dropzone'),
@@ -14,6 +16,9 @@ const els = {
   sheet: document.querySelector('#sheet-select'),
   header: document.querySelector('#header-checkbox'),
   rules: document.querySelector('#rule-list'),
+  dictionaryInput: document.querySelector('#dictionary-input'),
+  dictionarySave: document.querySelector('#dictionary-save'),
+  dictionaryStatus: document.querySelector('#dictionary-status'),
   previewHead: document.querySelector('#preview-table thead'),
   previewBody: document.querySelector('#preview-table tbody'),
   previewCount: document.querySelector('#preview-count'),
@@ -22,7 +27,17 @@ const els = {
   status: document.querySelector('#status'),
 };
 
-const state = { file: null, workbook: null, rules: new Map(), sheetIndex: 0, hasHeader: true, importWarnings: [] };
+const state = {
+  file: null, workbook: null, rules: new Map(), addressColumns: new Map(),
+  regionColumns: new Map(), splitColumns: new Map(), sheetIndex: 0,
+  hasHeader: true, importWarnings: [],
+  customCorrections: [],
+};
+const SPLIT_OPTIONS = [
+  { value: 'none', label: 'Tidak dipisah' },
+  { value: 'nis', label: 'NIS / NISN' },
+  { value: 'birth', label: 'Tempat / tanggal lahir' },
+];
 let previewTimer;
 
 function setStatus(message, error = false) {
@@ -68,6 +83,62 @@ function rulesFor(sheetIndex) {
 function ruleFor(sheetIndex, columnIndex, rowIndex) {
   return state.hasHeader && rowIndex === 1 ? 'space' : rulesFor(sheetIndex)[columnIndex - 1] || 'space';
 }
+function settingFor(map, sheetIndex, columnIndex, fallback = false) {
+  return map.get(sheetIndex)?.[columnIndex - 1] ?? fallback;
+}
+function splitFor(sheetIndex, columnIndex) {
+  return settingFor(state.splitColumns, sheetIndex, columnIndex, 'none');
+}
+function isHeaderRow(rowIndex) { return state.hasHeader && rowIndex === 1; }
+function splitHeaders(mode) {
+  return mode === 'nis' ? ['NIS', 'NISN'] : ['Tempat Lahir', 'Tanggal Lahir'];
+}
+function splitValue(mode, value) {
+  if (value == null || value === '') return { parts: ['', ''], warning: '', correction: '' };
+  if (typeof value !== 'string') return { parts: [value, ''], warning: 'Isi bukan teks; pemisahan perlu diperiksa.', correction: '' };
+  return mode === 'nis' ? splitNisNisn(value) : splitBirthPlaceDate(value, state.customCorrections);
+}
+
+function initializeColumnSettings(workbook) {
+  state.rules = new Map();
+  state.addressColumns = new Map();
+  state.regionColumns = new Map();
+  state.splitColumns = new Map();
+  workbook.worksheets.forEach((sheet, sheetIndex) => {
+    const rules = [];
+    const addresses = [];
+    const regions = [];
+    const splits = [];
+    for (let column = 1; column <= sheet.columnCount; column++) {
+      const header = cellLabel(sheet.getRow(1).getCell(column)).toLocaleLowerCase('id-ID');
+      const sample = cellLabel(sheet.getRow(2).getCell(column));
+      const address = /\balamat\b|domisili/.test(header);
+      const birth = /\bttl\b|tempat\s*(?:dan\s*)?tanggal\s*lahir|tempat\s*lahir/.test(header);
+      const nis = /\bnis\b\s*[/&-]\s*\bnisn\b|\bnisn\b\s*[/&-]\s*\bnis\b/.test(header);
+      rules.push(address ? 'title' : 'space');
+      addresses.push(address);
+      regions.push(birth || /\bkabupaten\b|\bkota\b|\bprovinsi\b/.test(header));
+      splits.push(nis ? 'nis' : birth && /,\s*\d{1,2}\s+\S+\s+\d{4}/.test(sample) ? 'birth' : 'none');
+    }
+    state.rules.set(sheetIndex, rules);
+    state.addressColumns.set(sheetIndex, addresses);
+    state.regionColumns.set(sheetIndex, regions);
+    state.splitColumns.set(sheetIndex, splits);
+  });
+}
+
+function transformConfiguredCell(value, sheetIndex, column, rowIndex, numFmt = '') {
+  if (typeof value !== 'string' || isHeaderRow(rowIndex)) {
+    return { ...transformCell(value, ruleFor(sheetIndex, column, rowIndex), numFmt), warning: '' };
+  }
+  const result = cleanConfiguredText(value, {
+    caseRule: ruleFor(sheetIndex, column, rowIndex),
+    address: settingFor(state.addressColumns, sheetIndex, column),
+    region: settingFor(state.regionColumns, sheetIndex, column),
+    corrections: state.customCorrections,
+  });
+  return { ...result, textFormat: /^0\d/.test(result.next) };
+}
 
 function cellLabel(cell) {
   if (cell.value == null) return '';
@@ -106,7 +177,40 @@ function renderRules() {
       rulesFor(state.sheetIndex)[index - 1] = select.value;
       schedulePreview();
     });
-    item.append(small, strong, select);
+    const addressLabel = document.createElement('label');
+    addressLabel.className = 'rule-toggle';
+    const addressCheckbox = document.createElement('input');
+    addressCheckbox.type = 'checkbox';
+    addressCheckbox.checked = settingFor(state.addressColumns, state.sheetIndex, index);
+    addressCheckbox.setAttribute('aria-label', `Tata alamat kolom ${columnName}`);
+    addressCheckbox.addEventListener('change', () => {
+      state.addressColumns.get(state.sheetIndex)[index - 1] = addressCheckbox.checked;
+      schedulePreview();
+    });
+    addressLabel.append(addressCheckbox, ' Tata alamat Indonesia');
+    const regionLabel = document.createElement('label');
+    regionLabel.className = 'rule-toggle';
+    const regionCheckbox = document.createElement('input');
+    regionCheckbox.type = 'checkbox';
+    regionCheckbox.checked = settingFor(state.regionColumns, state.sheetIndex, index);
+    regionCheckbox.setAttribute('aria-label', `Koreksi wilayah kolom ${columnName}`);
+    regionCheckbox.addEventListener('change', () => {
+      state.regionColumns.get(state.sheetIndex)[index - 1] = regionCheckbox.checked;
+      schedulePreview();
+    });
+    regionLabel.append(regionCheckbox, ' Koreksi nama wilayah');
+    const splitCaption = document.createElement('span');
+    splitCaption.className = 'rule-caption';
+    splitCaption.textContent = 'PISAHKAN KOLOM';
+    const splitSelect = document.createElement('select');
+    splitSelect.setAttribute('aria-label', `Pisahkan kolom ${columnName}`);
+    SPLIT_OPTIONS.forEach(option => splitSelect.append(makeOption(option.value, option.label)));
+    splitSelect.value = splitFor(state.sheetIndex, index);
+    splitSelect.addEventListener('change', () => {
+      state.splitColumns.get(state.sheetIndex)[index - 1] = splitSelect.value;
+      schedulePreview();
+    });
+    item.append(small, strong, select, addressLabel, regionLabel, splitCaption, splitSelect);
     fragment.append(item);
   }
   els.rules.replaceChildren(fragment);
@@ -126,12 +230,18 @@ function schedulePreview() {
 function renderPreview() {
   const sheet = currentSheet();
   const maxColumn = Math.min(Math.max(1, sheet.columnCount), 20);
+  const columns = [];
+  for (let column = 1; column <= maxColumn; column++) {
+    const mode = splitFor(state.sheetIndex, column);
+    if (mode === 'none') columns.push({ column, part: -1, label: state.hasHeader ? cellLabel(sheet.getRow(1).getCell(column)).trim() || sheet.getColumn(column).letter : sheet.getColumn(column).letter });
+    else splitHeaders(mode).forEach((label, part) => columns.push({ column, part, label, mode }));
+  }
   const headRow = document.createElement('tr');
   headRow.append(document.createElement('th'));
   headRow.firstChild.textContent = 'BARIS';
-  for (let column = 1; column <= maxColumn; column++) {
+  for (const column of columns) {
     const th = document.createElement('th');
-    th.textContent = state.hasHeader ? cellLabel(sheet.getRow(1).getCell(column)).trim() || sheet.getColumn(column).letter : sheet.getColumn(column).letter;
+    th.textContent = column.label;
     headRow.append(th);
   }
   els.previewHead.replaceChildren(headRow);
@@ -144,18 +254,32 @@ function renderPreview() {
     const rowNumber = document.createElement('td');
     rowNumber.textContent = String(rowIndex);
     tr.append(rowNumber);
-    for (let column = 1; column <= maxColumn; column++) {
-      const cell = sheet.getRow(rowIndex).getCell(column);
+    for (const column of columns) {
+      const cell = sheet.getRow(rowIndex).getCell(column.column);
       const td = document.createElement('td');
       const original = cellLabel(cell);
-      const transformed = transformCell(cell.value, ruleFor(state.sheetIndex, column, rowIndex), cell.numFmt);
-      td.textContent = transformed.changed ? String(transformed.next) : original;
-      if (transformed.changed) {
-        td.className = 'changed';
-        td.title = `Sebelum: ${original}`;
-        previewChanges++;
+      if (column.part >= 0) {
+        const result = isHeaderRow(rowIndex) ? { parts: splitHeaders(column.mode) } : splitValue(column.mode, cell.value);
+        td.textContent = String(result.parts[column.part] ?? '');
+        if (!isHeaderRow(rowIndex) && !result.warning && original) {
+          td.className = 'changed';
+          td.title = `Sebelum: ${original}${result.correction ? ` · ${result.correction}` : ''}`;
+          if (column.part === 0) previewChanges++;
+        } else if (result.warning && column.part === 0) {
+          td.className = 'needs-review';
+          td.title = result.warning;
+        }
       } else {
-        td.title = original;
+        const transformed = transformConfiguredCell(cell.value, state.sheetIndex, column.column, rowIndex, cell.numFmt);
+        td.textContent = transformed.changed ? String(transformed.next) : original;
+        if (transformed.changed) {
+          td.className = 'changed';
+          td.title = `Sebelum: ${original}`;
+          previewChanges++;
+        } else if (transformed.warning) {
+          td.className = 'needs-review';
+          td.title = transformed.warning;
+        } else td.title = original;
       }
       tr.append(td);
     }
@@ -163,7 +287,7 @@ function renderPreview() {
   }
   els.previewBody.replaceChildren(fragment);
   els.previewCount.textContent = `${previewChanges} perubahan di pratinjau`;
-  els.previewNote.textContent = `Menampilkan ${maxRow} dari ${sheet.rowCount} baris dan ${maxColumn} dari ${sheet.columnCount} kolom. Semua baris dan kolom diproses saat mengunduh.`;
+  els.previewNote.textContent = `Menampilkan ${maxRow} dari ${sheet.rowCount} baris dan ${maxColumn} dari ${sheet.columnCount} kolom sumber. Semua baris dan kolom diproses saat mengunduh.`;
 }
 
 async function handleFile(file) {
@@ -174,7 +298,7 @@ async function handleFile(file) {
     const { workbook, warnings } = await readFile(file);
     state.file = file;
     state.workbook = workbook;
-    state.rules = new Map();
+    initializeColumnSettings(workbook);
     state.sheetIndex = 0;
     state.importWarnings = warnings;
     els.name.textContent = file.name;
@@ -241,20 +365,47 @@ async function exportFiles() {
       sheet.eachRow((row, rowIndex) => {
         row.eachCell({ includeEmpty: false }, cell => {
           if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) {
-            rows.push([sheet.name, cell.address, 'Peringatan', cellLabel(cell), cellLabel(cell), 'Rumus dibiarkan; periksa hasil hitung saat dibuka di Excel']);
+            rows.push([sheet.name, cell.address, 'Peringatan', cellLabel(cell), cellLabel(cell), 'Rumus dibiarkan; periksa hasil hitung saat dibuka di LibreOffice Calc']);
             warningCount++;
             return;
           }
+          if (!isHeaderRow(rowIndex) && splitFor(sheetIndex, cell.col) !== 'none') return;
           const original = cellLabel(cell);
-          const result = transformCell(cell.value, ruleFor(sheetIndex, cell.col, rowIndex), cell.numFmt);
+          const result = transformConfiguredCell(cell.value, sheetIndex, cell.col, rowIndex, cell.numFmt);
           const needsTextFormat = result.textFormat && cell.numFmt !== '@';
           if (result.changed) cell.value = result.next;
           if (needsTextFormat) cell.numFmt = '@';
           if (result.changed || needsTextFormat) {
             rows.push([sheet.name, cell.address, 'Diubah', original, cellLabel(cell), result.reason || 'Nilai berawalan nol disimpan sebagai teks']);
           }
+          if (result.warning) {
+            rows.push([sheet.name, cell.address, 'Peringatan', original, cellLabel(cell), result.warning]);
+            warningCount++;
+          }
         });
       });
+      for (let column = sheet.columnCount; column >= 1; column--) {
+        const mode = splitFor(sheetIndex, column);
+        if (mode === 'none') continue;
+        const first = [];
+        const second = [];
+        for (let rowIndex = 1; rowIndex <= sheet.rowCount; rowIndex++) {
+          const cell = sheet.getRow(rowIndex).getCell(column);
+          const original = cellLabel(cell);
+          const result = isHeaderRow(rowIndex) ? { parts: splitHeaders(mode), warning: '' } : splitValue(mode, cell.value);
+          first.push(result.parts[0]);
+          second.push(result.parts[1]);
+          if (!isHeaderRow(rowIndex) && original) {
+            if (result.warning) {
+              rows.push([sheet.name, cell.address, 'Peringatan', original, original, result.warning]);
+              warningCount++;
+            } else {
+              rows.push([sheet.name, cell.address, 'Diubah', original, result.parts.join(' | '), `Kolom dipisah menjadi ${splitHeaders(mode).join(' dan ')}${result.correction ? `; ${result.correction}` : ''}`]);
+            }
+          }
+        }
+        sheet.spliceColumns(column, 1, first, second);
+      }
     }
     warnings.forEach(message => rows.push(['File sumber', '', 'Peringatan', '', '', message]));
     const { excelWorkbookToOds } = await import('./ods.js');
@@ -290,3 +441,23 @@ els.replace.addEventListener('click', () => els.input.click());
 els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); renderRules(); renderPreview(); });
 els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; renderRules(); renderPreview(); });
 els.export.addEventListener('click', exportFiles);
+try {
+  const saved = localStorage.getItem('rapihkandata-kamus') || '';
+  state.customCorrections = parseCorrectionDictionary(saved);
+  els.dictionaryInput.value = saved;
+} catch {
+  els.dictionaryStatus.textContent = 'Kamus tersimpan tidak dapat dibaca di browser ini.';
+}
+els.dictionarySave.addEventListener('click', () => {
+  try {
+    const entries = parseCorrectionDictionary(els.dictionaryInput.value);
+    state.customCorrections = entries;
+    let persisted = true;
+    try { localStorage.setItem('rapihkandata-kamus', els.dictionaryInput.value); }
+    catch { persisted = false; }
+    if (state.workbook) renderPreview();
+    els.dictionaryStatus.textContent = persisted ? `${entries.length} pasangan diterapkan.` : 'Kamus diterapkan, tetapi penyimpanan browser tidak tersedia.';
+  } catch (error) {
+    els.dictionaryStatus.textContent = error.message;
+  }
+});

@@ -6,7 +6,7 @@ export const RULES = [
   { value: 'keep', label: 'Biarkan isi' },
 ];
 
-const PRESERVE_UPPER = new Set(['PT', 'CV', 'RT', 'RW', 'DKI', 'SD', 'SMP', 'SMA', 'SMK', 'NIK', 'NISN']);
+const PRESERVE_UPPER = new Set(['PT', 'CV', 'RT', 'RW', 'DKI', 'SD', 'SMP', 'SMA', 'SMK', 'NIK', 'NISN', 'NIS', 'KH', 'R.A.', 'R.A', 'H.']);
 
 export function normalizeSpace(value) {
   return value.replace(/[\u00a0\u2007\u202f\t\r\n ]+/g, ' ').trim();
