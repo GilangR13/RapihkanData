@@ -25,6 +25,9 @@ const els = {
   previewPrev: document.querySelector('#preview-prev'),
   previewNext: document.querySelector('#preview-next'),
   previewRange: document.querySelector('#preview-range'),
+  previewColumnPrev: document.querySelector('#preview-column-prev'),
+  previewColumnNext: document.querySelector('#preview-column-next'),
+  previewColumnRange: document.querySelector('#preview-column-range'),
   export: document.querySelector('#export-button'),
   status: document.querySelector('#status'),
 };
@@ -35,8 +38,10 @@ const state = {
   hasHeader: true, importWarnings: [],
   customCorrections: [],
   previewPage: 0,
+  previewColumnPage: 0,
 };
 const PREVIEW_PAGE_SIZE = 50;
+const PREVIEW_COLUMN_PAGE_SIZE = 20;
 const SPLIT_OPTIONS = [
   { value: 'none', label: 'Tidak dipisah' },
   { value: 'nis', label: 'NIS / NISN' },
@@ -237,9 +242,13 @@ function renderPreview() {
   state.previewPage = Math.min(state.previewPage, pageCount - 1);
   const firstRow = state.previewPage * PREVIEW_PAGE_SIZE + 1;
   const lastRow = Math.min(sheet.rowCount, firstRow + PREVIEW_PAGE_SIZE - 1);
-  const maxColumn = Math.min(Math.max(1, sheet.columnCount), 20);
+  const totalColumns = Math.max(1, sheet.columnCount);
+  const columnPageCount = Math.max(1, Math.ceil(totalColumns / PREVIEW_COLUMN_PAGE_SIZE));
+  state.previewColumnPage = Math.min(state.previewColumnPage, columnPageCount - 1);
+  const firstColumn = state.previewColumnPage * PREVIEW_COLUMN_PAGE_SIZE + 1;
+  const lastColumn = Math.min(totalColumns, firstColumn + PREVIEW_COLUMN_PAGE_SIZE - 1);
   const columns = [];
-  for (let column = 1; column <= maxColumn; column++) {
+  for (let column = firstColumn; column <= lastColumn; column++) {
     const mode = splitFor(state.sheetIndex, column);
     if (mode === 'none') columns.push({ column, part: -1, label: state.hasHeader ? cellLabel(sheet.getRow(1).getCell(column)).trim() || sheet.getColumn(column).letter : sheet.getColumn(column).letter });
     else splitHeaders(mode).forEach((label, part) => columns.push({ column, part, label, mode }));
@@ -301,7 +310,10 @@ function renderPreview() {
   els.previewRange.textContent = sheet.rowCount ? `Baris ${firstRow}–${lastRow} dari ${sheet.rowCount}` : 'Tidak ada baris';
   els.previewPrev.disabled = state.previewPage === 0;
   els.previewNext.disabled = state.previewPage >= pageCount - 1;
-  els.previewNote.textContent = `Pratinjau menampilkan ${maxColumn} dari ${sheet.columnCount} kolom sumber. Semua baris dan kolom diproses saat mengunduh.`;
+  els.previewColumnRange.textContent = `Kolom ${firstColumn}–${lastColumn} dari ${totalColumns}`;
+  els.previewColumnPrev.disabled = state.previewColumnPage === 0;
+  els.previewColumnNext.disabled = state.previewColumnPage >= columnPageCount - 1;
+  els.previewNote.textContent = 'Pratinjau menampilkan sebagian baris dan kolom per halaman. Semua baris dan kolom diproses saat mengunduh.';
 }
 
 async function handleFile(file) {
@@ -315,6 +327,7 @@ async function handleFile(file) {
     initializeColumnSettings(workbook);
     state.sheetIndex = 0;
     state.previewPage = 0;
+    state.previewColumnPage = 0;
     state.importWarnings = warnings;
     els.name.textContent = file.name;
     els.details.textContent = `${fileSize(file.size)} · ${workbook.worksheets.length} lembar`;
@@ -412,10 +425,12 @@ els.dropzone.addEventListener('drop', event => {
 });
 els.input.addEventListener('change', () => { handleFile(els.input.files[0]); els.input.value = ''; });
 els.replace.addEventListener('click', () => els.input.click());
-els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); state.previewPage = 0; renderRules(); renderPreview(); });
-els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; state.previewPage = 0; renderRules(); renderPreview(); });
+els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); state.previewPage = 0; state.previewColumnPage = 0; renderRules(); renderPreview(); });
+els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; state.previewPage = 0; state.previewColumnPage = 0; renderRules(); renderPreview(); });
 els.previewPrev.addEventListener('click', () => { state.previewPage--; renderPreview(); });
 els.previewNext.addEventListener('click', () => { state.previewPage++; renderPreview(); });
+els.previewColumnPrev.addEventListener('click', () => { state.previewColumnPage--; renderPreview(); });
+els.previewColumnNext.addEventListener('click', () => { state.previewColumnPage++; renderPreview(); });
 els.export.addEventListener('click', exportFiles);
 try {
   const saved = localStorage.getItem('rapihkandata-kamus') || '';

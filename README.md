@@ -22,7 +22,7 @@ Web untuk merapikan **seluruh kolom data** dalam file Excel (`.xlsx`), OpenDocum
 - Jika sel Excel berisi angka `127` tetapi formatnya `00000`, hasil disimpan sebagai teks `00127`.
 - Angka biasa, tanggal, dan sel kosong tidak diubah. Rumus tidak diubah; hasil hitungnya perlu diperiksa setelah file ODS dibuka.
 - Urutan baris, urutan kolom, dan nama lembar dipertahankan. File sumber tidak ditimpa.
-- Pratinjau menandai sel yang berubah dan sel yang perlu diperiksa. Tombol **Sebelumnya/Berikutnya** menampilkan semua baris per 50 baris; pratinjau menampilkan 20 kolom sumber pertama. Seluruh data tetap diproses saat mengunduh.
+- Pratinjau menandai sel yang berubah dan sel yang perlu diperiksa. Tombol navigasi menampilkan semua baris per 50 baris dan semua kolom per 20 kolom. Seluruh data tetap diproses saat mengunduh.
 
 **Batas penting:** Bila nol awal sudah hilang di file sumber dan tidak ada petunjuk dari format sel, web tidak bisa menebaknya. Daftar BPS mencakup provinsi dan kabupaten/kota, bukan seluruh jalan, desa, atau kampung; ejaan nama jalan yang belum masuk kamus sendiri tidak ditebak otomatis. Aturan kapital awal kata memakai pengecualian singkatan umum, tetapi nama, gelar, dan alamat tetap perlu ditinjau. Hasil akhir selalu ODS; file sumber `.xlsx` atau `.ods` yang berisi fitur kompleks seperti grafik, pivot, macro, atau koneksi data perlu diperiksa kembali karena konversi berfokus pada isi sel, lembar, dan merge, bukan seluruh tampilan atau fitur khusus. CSV yang memakai encoding lama dapat menunjukkan karakter pengganti; bila itu terjadi, ubah sumber menjadi UTF-8 lebih dulu.
 
