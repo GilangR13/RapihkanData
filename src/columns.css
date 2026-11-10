@@ -22,3 +22,21 @@ td.needs-review { background: #fff2d8; color: #80521e; }
 .preview-pager { display: flex; justify-content: center; align-items: center; gap: 14px; padding: 13px 16px 0; color: #526a60; font-size: 12px; }
 .preview-pager button { border: 1px solid #d8e3d9; background: #fff; color: #286944; border-radius: 8px; padding: 7px 10px; font-weight: 700; cursor: pointer; }
 .preview-pager button:disabled { opacity: .45; cursor: default; }
+.merge-section { padding: 0 24px 28px; }
+.merge-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 22px 0 14px; border-top: 1px solid #e7eee7; }
+.merge-section-heading h3 { margin: 0; font: 800 20px Manrope,Arial,sans-serif; }
+.merge-section-heading p:last-child { margin: 7px 0 0; color: #61776b; font-size: 12px; line-height: 1.5; }
+.merge-add { border: 1px solid #28704f; background: #fff; color: #286944; border-radius: 9px; padding: 10px 13px; font-weight: 800; white-space: nowrap; cursor: pointer; }
+.merge-list { display: grid; gap: 12px; }
+.merge-card { border: 1px solid #dce6df; border-radius: 12px; padding: 16px; background: #f8fbf8; }
+.merge-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.merge-card-head strong { font-size: 14px; }
+.merge-remove { border: 0; background: transparent; color: #a43b36; cursor: pointer; font-weight: 700; }
+.merge-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.merge-fields label { display: grid; gap: 5px; color: #526a60; font-size: 12px; font-weight: 700; }
+.merge-fields input { min-width: 0; border: 1px solid #c8d8cd; border-radius: 8px; padding: 9px 10px; font: 13px Arial,sans-serif; }
+.merge-columns { display: grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap: 5px 12px; max-height: 160px; overflow: auto; padding: 10px; background: #fff; border: 1px solid #dce6df; border-radius: 8px; }
+.merge-columns label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #365a48; cursor: pointer; }
+.merge-columns input { accent-color: #28704f; }
+.merge-error { color: #a43b36; font-size: 12px; margin: 8px 0 0; }
+@media(max-width:550px) { .merge-section { padding-left: 16px; padding-right: 16px; } .merge-section-heading { align-items: start; flex-direction: column; } .merge-fields { grid-template-columns: 1fr; } }

@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import { RULES, transformCell } from './cleaner.js';
 import { cleanConfiguredText, splitNisNisn, splitBirthPlaceDate, parseCorrectionDictionary } from './indonesia.js';
+import { joinMergeValues, shiftedColumn } from './merge.js';
 import './style.css';
 import './columns.css';
 
@@ -15,6 +16,8 @@ const els = {
   sheet: document.querySelector('#sheet-select'),
   header: document.querySelector('#header-checkbox'),
   rules: document.querySelector('#rule-list'),
+  mergeList: document.querySelector('#merge-list'),
+  addMerge: document.querySelector('#add-merge'),
   dictionaryInput: document.querySelector('#dictionary-input'),
   dictionarySave: document.querySelector('#dictionary-save'),
   dictionaryStatus: document.querySelector('#dictionary-status'),
@@ -34,7 +37,7 @@ const els = {
 
 const state = {
   file: null, workbook: null, rules: new Map(), addressColumns: new Map(),
-  regionColumns: new Map(), splitColumns: new Map(), sheetIndex: 0,
+  regionColumns: new Map(), splitColumns: new Map(), mergeGroups: new Map(), sheetIndex: 0,
   hasHeader: true, importWarnings: [],
   customCorrections: [],
   previewPage: 0,
@@ -98,6 +101,30 @@ function settingFor(map, sheetIndex, columnIndex, fallback = false) {
 function splitFor(sheetIndex, columnIndex) {
   return settingFor(state.splitColumns, sheetIndex, columnIndex, 'none');
 }
+function mergeGroupsFor(sheetIndex) {
+  if (!state.mergeGroups.has(sheetIndex)) state.mergeGroups.set(sheetIndex, []);
+  return state.mergeGroups.get(sheetIndex);
+}
+function mergeError(sheetIndex, group, groupIndex) {
+  if (group.columns.length < 2) return 'Pilih minimal dua kolom.';
+  if (group.columns.some(column => splitFor(sheetIndex, column) !== 'none')) return 'Kolom yang digabung tidak boleh sekaligus memakai aturan Pisahkan kolom.';
+  const groups = mergeGroupsFor(sheetIndex);
+  if (groups.some((other, index) => index !== groupIndex && other.columns.some(column => group.columns.includes(column)))) return 'Satu kolom hanya boleh masuk ke satu gabungan.';
+  return '';
+}
+function mergedCellText(cell) {
+  if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) return cell.value.result == null ? '' : String(cell.value.result);
+  return cellLabel(cell);
+}
+function mergedRowValue(sheet, sheetIndex, rowIndex, group) {
+  const values = group.columns.map(column => {
+    const cell = sheet.getRow(rowIndex).getCell(column);
+    if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) return mergedCellText(cell);
+    const transformed = transformConfiguredCell(cell.value, sheetIndex, column, rowIndex, cell.numFmt);
+    return transformed.changed ? transformed.next : mergedCellText(cell);
+  });
+  return joinMergeValues(values, group.separator);
+}
 function isHeaderRow(rowIndex) { return state.hasHeader && rowIndex === 1; }
 function splitHeaders(mode) {
   return mode === 'nis' ? ['NIS', 'NISN'] : ['Tempat Lahir', 'Tanggal Lahir'];
@@ -113,6 +140,7 @@ function initializeColumnSettings(workbook) {
   state.addressColumns = new Map();
   state.regionColumns = new Map();
   state.splitColumns = new Map();
+  state.mergeGroups = new Map();
   workbook.worksheets.forEach((sheet, sheetIndex) => {
     const rules = [];
     const addresses = [];
@@ -217,6 +245,7 @@ function renderRules() {
     splitSelect.value = splitFor(state.sheetIndex, index);
     splitSelect.addEventListener('change', () => {
       state.splitColumns.get(state.sheetIndex)[index - 1] = splitSelect.value;
+      renderMergeGroups();
       schedulePreview();
     });
     item.append(small, strong, select, addressLabel, regionLabel, splitCaption, splitSelect);
@@ -231,6 +260,68 @@ function renderRules() {
   }
 }
 
+function renderMergeGroups() {
+  const sheet = currentSheet();
+  const groups = mergeGroupsFor(state.sheetIndex);
+  const fragment = document.createDocumentFragment();
+  groups.forEach((group, groupIndex) => {
+    const card = document.createElement('div');
+    card.className = 'merge-card';
+    const head = document.createElement('div');
+    head.className = 'merge-card-head';
+    const title = document.createElement('strong');
+    title.textContent = `Gabungan ${groupIndex + 1}`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'merge-remove';
+    remove.textContent = 'Hapus gabungan';
+    remove.addEventListener('click', () => { groups.splice(groupIndex, 1); renderMergeGroups(); renderPreview(); });
+    head.append(title, remove);
+
+    const fields = document.createElement('div');
+    fields.className = 'merge-fields';
+    for (const [caption, key] of [['Judul kolom hasil', 'header'], ['Teks penghubung (spasi ikut dihitung)', 'separator']]) {
+      const label = document.createElement('label');
+      label.textContent = caption;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = group[key];
+      input.setAttribute('aria-label', `${caption} gabungan ${groupIndex + 1}`);
+      input.addEventListener('input', () => { group[key] = input.value; schedulePreview(); });
+      label.append(input);
+      fields.append(label);
+    }
+
+    const choices = document.createElement('div');
+    choices.className = 'merge-columns';
+    for (let column = 1; column <= sheet.columnCount; column++) {
+      const option = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = group.columns.includes(column);
+      checkbox.disabled = groups.some((other, index) => index !== groupIndex && other.columns.includes(column)) || splitFor(state.sheetIndex, column) !== 'none';
+      checkbox.setAttribute('aria-label', `Gabungan ${groupIndex + 1}, kolom ${sheet.getColumn(column).letter}`);
+      checkbox.addEventListener('change', () => {
+        group.columns = checkbox.checked ? [...group.columns, column].sort((a, b) => a - b) : group.columns.filter(value => value !== column);
+        renderMergeGroups();
+        renderPreview();
+      });
+      option.append(checkbox, `${sheet.getColumn(column).letter} · ${cellLabel(sheet.getRow(1).getCell(column)) || `Kolom ${column}`}`);
+      choices.append(option);
+    }
+    const error = mergeError(state.sheetIndex, group, groupIndex);
+    card.append(head, fields, choices);
+    if (error) {
+      const message = document.createElement('p');
+      message.className = 'merge-error';
+      message.textContent = error;
+      card.append(message);
+    }
+    fragment.append(card);
+  });
+  els.mergeList.replaceChildren(fragment);
+}
+
 function schedulePreview() {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(renderPreview, 100);
@@ -242,17 +333,25 @@ function renderPreview() {
   state.previewPage = Math.min(state.previewPage, pageCount - 1);
   const firstRow = state.previewPage * PREVIEW_PAGE_SIZE + 1;
   const lastRow = Math.min(sheet.rowCount, firstRow + PREVIEW_PAGE_SIZE - 1);
-  const totalColumns = Math.max(1, sheet.columnCount);
+  const validGroups = mergeGroupsFor(state.sheetIndex).filter((group, index) => !mergeError(state.sheetIndex, group, index));
+  const mergedSources = new Map(validGroups.flatMap(group => group.columns.map(column => [column, group])));
+  const allColumns = [];
+  for (let column = 1; column <= Math.max(1, sheet.columnCount); column++) {
+    const group = mergedSources.get(column);
+    if (group) {
+      if (column === group.columns[0]) allColumns.push({ column, part: -1, mergeGroup: group, label: group.header.trim() || 'Hasil gabungan' });
+      continue;
+    }
+    const mode = splitFor(state.sheetIndex, column);
+    if (mode === 'none') allColumns.push({ column, part: -1, label: state.hasHeader ? cellLabel(sheet.getRow(1).getCell(column)).trim() || sheet.getColumn(column).letter : sheet.getColumn(column).letter });
+    else splitHeaders(mode).forEach((label, part) => allColumns.push({ column, part, label, mode }));
+  }
+  const totalColumns = allColumns.length;
   const columnPageCount = Math.max(1, Math.ceil(totalColumns / PREVIEW_COLUMN_PAGE_SIZE));
   state.previewColumnPage = Math.min(state.previewColumnPage, columnPageCount - 1);
   const firstColumn = state.previewColumnPage * PREVIEW_COLUMN_PAGE_SIZE + 1;
   const lastColumn = Math.min(totalColumns, firstColumn + PREVIEW_COLUMN_PAGE_SIZE - 1);
-  const columns = [];
-  for (let column = firstColumn; column <= lastColumn; column++) {
-    const mode = splitFor(state.sheetIndex, column);
-    if (mode === 'none') columns.push({ column, part: -1, label: state.hasHeader ? cellLabel(sheet.getRow(1).getCell(column)).trim() || sheet.getColumn(column).letter : sheet.getColumn(column).letter });
-    else splitHeaders(mode).forEach((label, part) => columns.push({ column, part, label, mode }));
-  }
+  const columns = allColumns.slice(firstColumn - 1, lastColumn);
   const headRow = document.createElement('tr');
   headRow.append(document.createElement('th'));
   headRow.firstChild.textContent = 'BARIS';
@@ -275,7 +374,20 @@ function renderPreview() {
       const cell = sheet.getRow(rowIndex).getCell(column.column);
       const td = document.createElement('td');
       const original = cellLabel(cell);
-      if (column.part >= 0) {
+      if (column.mergeGroup) {
+        const originalValues = column.mergeGroup.columns.map(source => cellLabel(sheet.getRow(rowIndex).getCell(source)));
+        td.textContent = isHeaderRow(rowIndex) ? column.label : mergedRowValue(sheet, state.sheetIndex, rowIndex, column.mergeGroup);
+        if (!isHeaderRow(rowIndex) && originalValues.some(Boolean)) {
+          const formula = column.mergeGroup.columns.some(source => {
+            const value = sheet.getRow(rowIndex).getCell(source).value;
+            return value && typeof value === 'object' && 'formula' in value;
+          });
+          td.className = formula ? 'needs-review' : 'changed';
+          td.title = formula ? 'Gabungan memakai hasil hitung rumus yang tersimpan; periksa nilainya.' : `Sebelum: ${originalValues.join(' | ')}`;
+          if (formula) previewWarnings++;
+          else previewChanges++;
+        }
+      } else if (column.part >= 0) {
         const result = isHeaderRow(rowIndex) ? { parts: splitHeaders(column.mode) } : splitValue(column.mode, cell.value);
         td.textContent = String(result.parts[column.part] ?? '');
         if (!isHeaderRow(rowIndex) && !result.warning && original) {
@@ -334,6 +446,7 @@ async function handleFile(file) {
     els.sheet.replaceChildren(...workbook.worksheets.map((sheet, index) => makeOption(String(index), sheet.name)));
     els.sheet.value = '0';
     renderRules();
+    renderMergeGroups();
     renderPreview();
     els.editor.classList.remove('hidden');
     setStatus(warnings.length ? warnings.join(' · ') : 'File siap ditinjau.');
@@ -358,6 +471,16 @@ function downloadBlob(blob, filename) {
 
 async function exportFiles() {
   if (!state.file) return;
+  for (let sheetIndex = 0; sheetIndex < state.workbook.worksheets.length; sheetIndex++) {
+    const groups = mergeGroupsFor(sheetIndex);
+    for (let index = 0; index < groups.length; index++) {
+      const error = mergeError(sheetIndex, groups[index], index);
+      if (error) {
+        setStatus(`Gabungan ${index + 1} pada lembar ${state.workbook.worksheets[sheetIndex].name}: ${error}`, true);
+        return;
+      }
+    }
+  }
   els.export.disabled = true;
   setStatus('Menyiapkan file ODS…');
   try {
@@ -366,6 +489,7 @@ async function exportFiles() {
     let warningCount = warnings.length;
     for (let sheetIndex = 0; sheetIndex < workbook.worksheets.length; sheetIndex++) {
       const sheet = workbook.worksheets[sheetIndex];
+      const originalColumnCount = sheet.columnCount;
       sheet.eachRow((row, rowIndex) => {
         row.eachCell({ includeEmpty: false }, cell => {
           if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) {
@@ -381,13 +505,31 @@ async function exportFiles() {
           if (result.warning) warningCount++;
         });
       });
-      for (let column = sheet.columnCount; column >= 1; column--) {
+      const groups = mergeGroupsFor(sheetIndex);
+      for (const group of groups) {
+        const anchor = group.columns[0];
+        for (let rowIndex = 1; rowIndex <= sheet.rowCount; rowIndex++) {
+          const target = sheet.getRow(rowIndex).getCell(anchor);
+          if (isHeaderRow(rowIndex)) {
+            target.value = group.header.trim() || 'Hasil gabungan';
+          } else {
+            const joined = joinMergeValues(group.columns.map(column => mergedCellText(sheet.getRow(rowIndex).getCell(column))), group.separator);
+            if (joined) changedCount++;
+            target.value = joined;
+            target.numFmt = '@';
+          }
+        }
+      }
+      const removedColumns = groups.flatMap(group => group.columns.slice(1)).sort((a, b) => b - a);
+      for (const column of removedColumns) sheet.spliceColumns(column, 1);
+      for (let column = originalColumnCount; column >= 1; column--) {
         const mode = splitFor(sheetIndex, column);
         if (mode === 'none') continue;
+        const currentColumn = shiftedColumn(column, removedColumns);
         const first = [];
         const second = [];
         for (let rowIndex = 1; rowIndex <= sheet.rowCount; rowIndex++) {
-          const cell = sheet.getRow(rowIndex).getCell(column);
+          const cell = sheet.getRow(rowIndex).getCell(currentColumn);
           const hasValue = cell.value != null && cell.value !== '';
           const result = isHeaderRow(rowIndex) ? { parts: splitHeaders(mode), warning: '' } : splitValue(mode, cell.value);
           first.push(result.parts[0]);
@@ -397,7 +539,7 @@ async function exportFiles() {
             else changedCount++;
           }
         }
-        sheet.spliceColumns(column, 1, first, second);
+        sheet.spliceColumns(currentColumn, 1, first, second);
       }
     }
     const { excelWorkbookToOds } = await import('./ods.js');
@@ -425,8 +567,14 @@ els.dropzone.addEventListener('drop', event => {
 });
 els.input.addEventListener('change', () => { handleFile(els.input.files[0]); els.input.value = ''; });
 els.replace.addEventListener('click', () => els.input.click());
-els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); state.previewPage = 0; state.previewColumnPage = 0; renderRules(); renderPreview(); });
+els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); state.previewPage = 0; state.previewColumnPage = 0; renderRules(); renderMergeGroups(); renderPreview(); });
 els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; state.previewPage = 0; state.previewColumnPage = 0; renderRules(); renderPreview(); });
+els.addMerge.addEventListener('click', () => {
+  const groups = mergeGroupsFor(state.sheetIndex);
+  groups.push({ columns: [], separator: ', ', header: `Gabungan ${groups.length + 1}` });
+  renderMergeGroups();
+  renderPreview();
+});
 els.previewPrev.addEventListener('click', () => { state.previewPage--; renderPreview(); });
 els.previewNext.addEventListener('click', () => { state.previewPage++; renderPreview(); });
 els.previewColumnPrev.addEventListener('click', () => { state.previewColumnPage--; renderPreview(); });
