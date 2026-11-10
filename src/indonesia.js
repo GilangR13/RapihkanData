@@ -54,11 +54,11 @@ function distanceAtMostTwo(a, b) {
 
 export function correctRegionName(input) {
   const spaced = normalizeSpace(input);
-  const prefixMatch = spaced.match(/^(Kabupaten|Kab\.|Kota)\s+(.+)$/i);
+  const prefixMatch = spaced.match(/^(Kabupaten|Kab\.|Kota|Provinsi|Prov\.)\s+(.+)$/i);
   const prefix = prefixMatch ? prefixMatch[1] : '';
   const place = prefixMatch ? prefixMatch[2] : spaced;
   const key = place.toLocaleLowerCase('id-ID');
-  const formattedPrefix = prefix ? (prefix.toLocaleLowerCase('id-ID').startsWith('kab') ? 'Kab. ' : 'Kota ') : '';
+  const formattedPrefix = prefix ? (prefix.toLocaleLowerCase('id-ID').startsWith('kab') ? 'Kab. ' : prefix.toLocaleLowerCase('id-ID').startsWith('prov') ? 'Provinsi ' : 'Kota ') : '';
   if (EXACT.has(key)) return { value: formattedPrefix + EXACT.get(key), corrected: false, suggestion: '' };
   if (REGION_CACHE.has(key)) {
     const cached = REGION_CACHE.get(key);
@@ -84,6 +84,36 @@ export function correctRegionName(input) {
   }
   REGION_CACHE.set(key, result);
   return { ...result, value: formattedPrefix + result.value };
+}
+
+export function correctRegionText(input) {
+  let corrected = false;
+  let suggestion = '';
+  const check = candidate => {
+    const result = correctRegionName(candidate);
+    if (result.corrected) {
+      corrected = true;
+      return result.value;
+    }
+    if (result.suggestion && !suggestion) suggestion = `Nama wilayah “${candidate}” mungkin “${result.suggestion}”; perlu diperiksa.`;
+    return candidate;
+  };
+  // Nama tempat dalam TTL atau alamat berkoma diperiksa terpisah dari teks setelah koma.
+  let value = input.split(/(,\s*)/).map((part, index) => index % 2 ? part : check(part)).join('');
+  // Nama wilayah setelah penanda administrasi juga dapat muncul di tengah alamat tanpa koma.
+  value = value.replace(/\b(Kabupaten|Kab\.|Kota|Provinsi|Prov\.)\s+([\p{L}]+(?:\s+[\p{L}]+){0,3})/giu, (whole, prefix, tail) => {
+    const words = tail.split(/\s+/);
+    for (let length = words.length; length >= 1; length--) {
+      const candidate = `${prefix} ${words.slice(0, length).join(' ')}`;
+      const result = correctRegionName(candidate);
+      if (result.corrected) {
+        corrected = true;
+        return result.value + (words.length > length ? ` ${words.slice(length).join(' ')}` : '');
+      }
+    }
+    return whole;
+  });
+  return { value, corrected, warning: suggestion };
 }
 
 export function formatIndonesianAddress(input, caseRule = 'title', corrections = []) {
@@ -116,13 +146,12 @@ export function cleanConfiguredText(input, { caseRule = 'space', address = false
     if (value !== input) reasons.push('Format teks dirapikan');
   }
   if (region) {
-    const checked = correctRegionName(value);
+    const checked = correctRegionText(value);
     if (checked.corrected) {
-      value = checked.value;
+      value = cleanString(checked.value, caseRule);
       reasons.push('Nama wilayah dicocokkan dengan daftar BPS');
-    } else if (checked.suggestion) {
-      warning = `Nama wilayah “${value}” mungkin “${checked.suggestion}”; perlu diperiksa.`;
     }
+    warning = checked.warning;
   }
   return { next: value, changed: value !== input, reason: reasons.join('; '), warning };
 }

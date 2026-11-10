@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   correctRegionName, formatIndonesianAddress, splitBirthPlaceDate, splitNisNisn,
-  parseCorrectionDictionary,
+  parseCorrectionDictionary, cleanConfiguredText,
 } from './indonesia.js';
 
 test('alamat RT/RW dan kampung ditata sesuai contoh konsumen', () => {
@@ -14,6 +14,15 @@ test('typo wilayah Garuta dan Cirebong dikoreksi dengan daftar BPS', () => {
   assert.equal(correctRegionName('Garuta').value, 'Garut');
   assert.equal(correctRegionName('Cirebong').value, 'Cirebon');
   assert.equal(correctRegionName('Bandung').value, 'Bandung');
+});
+
+test('centang koreksi wilayah membetulkan tempat pada sel TTL tanpa memisah kolom', () => {
+  assert.equal(cleanConfiguredText('Garuta, 05 Mei 2006', { region: true }).next, 'Garut, 05 Mei 2006');
+  assert.equal(cleanConfiguredText('Cirebong, 07 Agustus 2006', { region: true }).next, 'Cirebon, 07 Agustus 2006');
+  assert.equal(cleanConfiguredText('Kota Cirebong Jawa Barat', { region: true }).next, 'Kota Cirebon Jawa Barat');
+  assert.equal(cleanConfiguredText('Jl. Merdeka Kota Cirebong', { address: true, region: true, caseRule: 'title' }).next, 'Jl. Merdeka Kota Cirebon');
+  assert.equal(cleanConfiguredText('Garuta, 05 Mei 2006', { region: true, caseRule: 'upper' }).next, 'GARUT, 05 MEI 2006');
+  assert.equal(cleanConfiguredText('Garuta, 05 Mei 2006', { region: false }).next, 'Garuta, 05 Mei 2006');
 });
 
 test('NIS dan NISN dipisah tanpa menghilangkan nol awal', () => {

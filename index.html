@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#173d35" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <meta name="description" content="Rapikan data Excel, ODS, dan CSV konsumen, tinjau perubahan, lalu unduh file hasil dan laporan." />
+    <meta name="description" content="Rapikan data Excel, ODS, dan CSV konsumen, tinjau perubahan, lalu unduh hasil ODS." />
     <title>RapihkanData — Perapih data konsumen</title>
   </head>
   <body>
@@ -19,7 +19,7 @@
         <div class="hero-copy">
           <div class="eyebrow"><span class="eyebrow-dot"></span> Excel, ODS & CSV · Langsung di browser</div>
           <h1 id="hero-title">Data dari konsumen,<br /><em>lebih siap dikerjakan.</em></h1>
-          <p>Rapikan isi file, tinjau perubahan per kolom, lalu unduh data hasil dan laporan dalam satu ZIP. File asli tetap utuh.</p>
+          <p>Rapikan isi file, tinjau perubahan per kolom, lalu unduh hasil langsung sebagai file ODS. File asli tetap utuh.</p>
           <div class="hero-points"><span>01 · Pilih file</span><span>02 · Atur kolom</span><span>03 · Unduh hasil</span></div>
         </div>
         <div class="hero-visual" aria-hidden="true">
@@ -45,13 +45,14 @@
           <div class="dictionary-panel"><label for="dictionary-input"><strong>Kamus koreksi sendiri</strong></label><p>Untuk nama jalan, kampung, atau wilayah yang Anda kenal. Satu pasangan per baris: <code>salah = benar</code>. Berlaku pada kolom alamat, wilayah, dan tempat lahir; tersimpan hanya di browser ini.</p><textarea id="dictionary-input" rows="3" placeholder="Jl. Mawarh = Jl. Mawar\nCirebong = Cirebon"></textarea><button id="dictionary-save" class="text-button" type="button">Simpan kamus dan perbarui pratinjau</button><span id="dictionary-status" role="status"></span></div>
           <div class="preview-heading"><div><p class="section-kicker">PRATINJAU</p><h3>Periksa hasil sebelum mengunduh</h3></div><span id="preview-count" class="count-pill"></span></div>
           <div class="table-scroll"><table id="preview-table"><thead></thead><tbody></tbody></table></div>
+          <div class="preview-pager"><button id="preview-prev" type="button">← Sebelumnya</button><span id="preview-range"></span><button id="preview-next" type="button">Berikutnya →</button></div>
           <p id="preview-note" class="muted-note"></p>
-          <div class="export-panel"><div><strong>Siap membuat hasil?</strong><p>ZIP berisi file data rapi (.ods) dan laporan untuk Notepad (.txt). Semua lembar diproses.</p></div><button id="export-button" class="primary-button" type="button">Unduh hasil & laporan <span aria-hidden="true">↗</span></button></div>
+          <div class="export-panel"><div><strong>Sudah memeriksa pratinjau?</strong><p>Unduh satu file hasil (.ods). Semua lembar dan baris diproses; file asli tetap utuh.</p></div><button id="export-button" class="primary-button" type="button">Unduh hasil ODS <span aria-hidden="true">↗</span></button></div>
         </div>
         <p id="status" class="status" role="status" aria-live="polite"></p>
       </section>
 
-      <section class="how-it-works" aria-labelledby="how-title"><div><p class="section-kicker">CARA KERJA</p><h2 id="how-title">Rapi, dengan kendali di tangan Anda.</h2></div><div class="feature-grid"><article><span>01</span><h3>Alamat Indonesia</h3><p>Susunan seperti Kp.babakan dan Rt01/09 dirapikan menjadi Kp. Babakan dan RT 01/RW 09.</p></article><article><span>02</span><h3>Kolom bisa dipisah</h3><p>Pisahkan NIS/NISN atau tempat dan tanggal lahir menjadi dua kolom, dengan pratinjau sebelum diunduh.</p></article><article><span>03</span><h3>Nol awal dan koreksi</h3><p>Nilai 00127 tetap teks. Nama wilayah yang cocok kuat dengan daftar BPS diperbaiki; perubahan dan keraguan dicatat di laporan.</p></article></div></section>
+      <section class="how-it-works" aria-labelledby="how-title"><div><p class="section-kicker">CARA KERJA</p><h2 id="how-title">Rapi, dengan kendali di tangan Anda.</h2></div><div class="feature-grid"><article><span>01</span><h3>Alamat Indonesia</h3><p>Susunan seperti Kp.babakan dan Rt01/09 dirapikan menjadi Kp. Babakan dan RT 01/RW 09.</p></article><article><span>02</span><h3>Kolom bisa dipisah</h3><p>Pisahkan NIS/NISN atau tempat dan tanggal lahir menjadi dua kolom, dengan pratinjau sebelum diunduh.</p></article><article><span>03</span><h3>Nol awal dan koreksi</h3><p>Nilai 00127 tetap teks. Nama wilayah yang cocok kuat dengan daftar BPS diperbaiki; hasil dan peringatan dapat ditinjau di pratinjau.</p></article></div></section>
     </main>
     <footer><span>RapihkanData</span><span>Untuk menyiapkan data konsumen sebelum produksi.</span></footer>
     <script type="module" src="/src/main.js"></script>

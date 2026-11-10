@@ -1,6 +1,5 @@
 import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
-import JSZip from 'jszip';
 import { RULES, transformCell } from './cleaner.js';
 import { cleanConfiguredText, splitNisNisn, splitBirthPlaceDate, parseCorrectionDictionary } from './indonesia.js';
 import './style.css';
@@ -23,6 +22,9 @@ const els = {
   previewBody: document.querySelector('#preview-table tbody'),
   previewCount: document.querySelector('#preview-count'),
   previewNote: document.querySelector('#preview-note'),
+  previewPrev: document.querySelector('#preview-prev'),
+  previewNext: document.querySelector('#preview-next'),
+  previewRange: document.querySelector('#preview-range'),
   export: document.querySelector('#export-button'),
   status: document.querySelector('#status'),
 };
@@ -32,7 +34,9 @@ const state = {
   regionColumns: new Map(), splitColumns: new Map(), sheetIndex: 0,
   hasHeader: true, importWarnings: [],
   customCorrections: [],
+  previewPage: 0,
 };
+const PREVIEW_PAGE_SIZE = 50;
 const SPLIT_OPTIONS = [
   { value: 'none', label: 'Tidak dipisah' },
   { value: 'nis', label: 'NIS / NISN' },
@@ -229,6 +233,10 @@ function schedulePreview() {
 
 function renderPreview() {
   const sheet = currentSheet();
+  const pageCount = Math.max(1, Math.ceil(sheet.rowCount / PREVIEW_PAGE_SIZE));
+  state.previewPage = Math.min(state.previewPage, pageCount - 1);
+  const firstRow = state.previewPage * PREVIEW_PAGE_SIZE + 1;
+  const lastRow = Math.min(sheet.rowCount, firstRow + PREVIEW_PAGE_SIZE - 1);
   const maxColumn = Math.min(Math.max(1, sheet.columnCount), 20);
   const columns = [];
   for (let column = 1; column <= maxColumn; column++) {
@@ -247,9 +255,9 @@ function renderPreview() {
   els.previewHead.replaceChildren(headRow);
 
   const fragment = document.createDocumentFragment();
-  const maxRow = Math.min(sheet.rowCount, 31);
   let previewChanges = 0;
-  for (let rowIndex = 1; rowIndex <= maxRow; rowIndex++) {
+  let previewWarnings = 0;
+  for (let rowIndex = firstRow; rowIndex <= lastRow; rowIndex++) {
     const tr = document.createElement('tr');
     const rowNumber = document.createElement('td');
     rowNumber.textContent = String(rowIndex);
@@ -268,17 +276,20 @@ function renderPreview() {
         } else if (result.warning && column.part === 0) {
           td.className = 'needs-review';
           td.title = result.warning;
+          previewWarnings++;
         }
       } else {
         const transformed = transformConfiguredCell(cell.value, state.sheetIndex, column.column, rowIndex, cell.numFmt);
         td.textContent = transformed.changed ? String(transformed.next) : original;
-        if (transformed.changed) {
+        if (transformed.warning) {
+          td.className = 'needs-review';
+          td.title = `${transformed.changed ? `Sebelum: ${original} · ` : ''}${transformed.warning}`;
+          previewWarnings++;
+          if (transformed.changed) previewChanges++;
+        } else if (transformed.changed) {
           td.className = 'changed';
           td.title = `Sebelum: ${original}`;
           previewChanges++;
-        } else if (transformed.warning) {
-          td.className = 'needs-review';
-          td.title = transformed.warning;
         } else td.title = original;
       }
       tr.append(td);
@@ -286,8 +297,11 @@ function renderPreview() {
     fragment.append(tr);
   }
   els.previewBody.replaceChildren(fragment);
-  els.previewCount.textContent = `${previewChanges} perubahan di pratinjau`;
-  els.previewNote.textContent = `Menampilkan ${maxRow} dari ${sheet.rowCount} baris dan ${maxColumn} dari ${sheet.columnCount} kolom sumber. Semua baris dan kolom diproses saat mengunduh.`;
+  els.previewCount.textContent = `${previewChanges} perubahan · ${previewWarnings} perlu diperiksa`;
+  els.previewRange.textContent = sheet.rowCount ? `Baris ${firstRow}–${lastRow} dari ${sheet.rowCount}` : 'Tidak ada baris';
+  els.previewPrev.disabled = state.previewPage === 0;
+  els.previewNext.disabled = state.previewPage >= pageCount - 1;
+  els.previewNote.textContent = `Pratinjau menampilkan ${maxColumn} dari ${sheet.columnCount} kolom sumber. Semua baris dan kolom diproses saat mengunduh.`;
 }
 
 async function handleFile(file) {
@@ -300,6 +314,7 @@ async function handleFile(file) {
     state.workbook = workbook;
     initializeColumnSettings(workbook);
     state.sheetIndex = 0;
+    state.previewPage = 0;
     state.importWarnings = warnings;
     els.name.textContent = file.name;
     els.details.textContent = `${fileSize(file.size)} · ${workbook.worksheets.length} lembar`;
@@ -317,30 +332,6 @@ async function handleFile(file) {
   }
 }
 
-function buildTextReport(rows, sourceName, warningCount) {
-  const changedCount = rows.filter(row => row[2] === 'Diubah').length;
-  const lines = [
-    'LAPORAN RAPIHKANDATA',
-    `File sumber : ${sourceName}`,
-    `Sel diubah  : ${changedCount}`,
-    `Peringatan : ${warningCount}`,
-    '',
-    'File asli tidak diubah. Nilai yang sudah kehilangan nol awal sebelum dibaca tidak dapat dipulihkan tanpa acuan.',
-    '',
-    'RINCIAN',
-  ];
-  if (!rows.length) lines.push('Tidak ada perubahan atau peringatan.');
-  rows.forEach(([sheet, address, status, before, after, reason], index) => {
-    lines.push('', `${index + 1}. [${status}] ${sheet}${address ? `!${address}` : ''}`);
-    if (status === 'Diubah') {
-      lines.push(`   Sebelum : ${JSON.stringify(String(before))}`);
-      lines.push(`   Sesudah : ${JSON.stringify(String(after))}`);
-    }
-    lines.push(`   Catatan : ${reason}`);
-  });
-  return '\uFEFF' + lines.join('\r\n') + '\r\n';
-}
-
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -355,33 +346,26 @@ function downloadBlob(blob, filename) {
 async function exportFiles() {
   if (!state.file) return;
   els.export.disabled = true;
-  setStatus('Menyiapkan file rapi dan laporan…');
+  setStatus('Menyiapkan file ODS…');
   try {
     const { workbook, warnings } = await readFile(state.file);
-    const rows = [];
+    let changedCount = 0;
     let warningCount = warnings.length;
     for (let sheetIndex = 0; sheetIndex < workbook.worksheets.length; sheetIndex++) {
       const sheet = workbook.worksheets[sheetIndex];
       sheet.eachRow((row, rowIndex) => {
         row.eachCell({ includeEmpty: false }, cell => {
           if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) {
-            rows.push([sheet.name, cell.address, 'Peringatan', cellLabel(cell), cellLabel(cell), 'Rumus dibiarkan; periksa hasil hitung saat dibuka di LibreOffice Calc']);
             warningCount++;
             return;
           }
           if (!isHeaderRow(rowIndex) && splitFor(sheetIndex, cell.col) !== 'none') return;
-          const original = cellLabel(cell);
           const result = transformConfiguredCell(cell.value, sheetIndex, cell.col, rowIndex, cell.numFmt);
           const needsTextFormat = result.textFormat && cell.numFmt !== '@';
           if (result.changed) cell.value = result.next;
           if (needsTextFormat) cell.numFmt = '@';
-          if (result.changed || needsTextFormat) {
-            rows.push([sheet.name, cell.address, 'Diubah', original, cellLabel(cell), result.reason || 'Nilai berawalan nol disimpan sebagai teks']);
-          }
-          if (result.warning) {
-            rows.push([sheet.name, cell.address, 'Peringatan', original, cellLabel(cell), result.warning]);
-            warningCount++;
-          }
+          if (result.changed || needsTextFormat) changedCount++;
+          if (result.warning) warningCount++;
         });
       });
       for (let column = sheet.columnCount; column >= 1; column--) {
@@ -391,33 +375,23 @@ async function exportFiles() {
         const second = [];
         for (let rowIndex = 1; rowIndex <= sheet.rowCount; rowIndex++) {
           const cell = sheet.getRow(rowIndex).getCell(column);
-          const original = cellLabel(cell);
+          const hasValue = cell.value != null && cell.value !== '';
           const result = isHeaderRow(rowIndex) ? { parts: splitHeaders(mode), warning: '' } : splitValue(mode, cell.value);
           first.push(result.parts[0]);
           second.push(result.parts[1]);
-          if (!isHeaderRow(rowIndex) && original) {
-            if (result.warning) {
-              rows.push([sheet.name, cell.address, 'Peringatan', original, original, result.warning]);
-              warningCount++;
-            } else {
-              rows.push([sheet.name, cell.address, 'Diubah', original, result.parts.join(' | '), `Kolom dipisah menjadi ${splitHeaders(mode).join(' dan ')}${result.correction ? `; ${result.correction}` : ''}`]);
-            }
+          if (!isHeaderRow(rowIndex) && hasValue) {
+            if (result.warning) warningCount++;
+            else changedCount++;
           }
         }
         sheet.spliceColumns(column, 1, first, second);
       }
     }
-    warnings.forEach(message => rows.push(['File sumber', '', 'Peringatan', '', '', message]));
     const { excelWorkbookToOds } = await import('./ods.js');
     const cleanBuffer = excelWorkbookToOds(workbook);
-    const reportText = buildTextReport(rows, state.file.name, warningCount);
     const base = state.file.name.replace(/\.(xlsx|ods|csv)$/i, '').replace(/[\\/:*?"<>|]/g, '_');
-    const zip = new JSZip();
-    zip.file(`${base}_rapi.ods`, cleanBuffer);
-    zip.file(`${base}_laporan.txt`, reportText);
-    downloadBlob(await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }), `${base}_hasil.zip`);
-    const changedCount = rows.filter(row => row[2] === 'Diubah').length;
-    setStatus(`Selesai. ${changedCount} perubahan dan ${warningCount} peringatan tercatat dalam ZIP.`);
+    downloadBlob(new Blob([cleanBuffer], { type: 'application/vnd.oasis.opendocument.spreadsheet' }), `${base}_rapi.ods`);
+    setStatus(`Selesai. File ODS diunduh dengan ${changedCount} perubahan dan ${warningCount} peringatan untuk ditinjau.`);
   } catch (error) {
     setStatus(`Gagal membuat hasil: ${error.message}`, true);
   } finally {
@@ -438,8 +412,10 @@ els.dropzone.addEventListener('drop', event => {
 });
 els.input.addEventListener('change', () => { handleFile(els.input.files[0]); els.input.value = ''; });
 els.replace.addEventListener('click', () => els.input.click());
-els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); renderRules(); renderPreview(); });
-els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; renderRules(); renderPreview(); });
+els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet.value); state.previewPage = 0; renderRules(); renderPreview(); });
+els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; state.previewPage = 0; renderRules(); renderPreview(); });
+els.previewPrev.addEventListener('click', () => { state.previewPage--; renderPreview(); });
+els.previewNext.addEventListener('click', () => { state.previewPage++; renderPreview(); });
 els.export.addEventListener('click', exportFiles);
 try {
   const saved = localStorage.getItem('rapihkandata-kamus') || '';
