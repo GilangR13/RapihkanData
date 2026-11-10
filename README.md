@@ -43,6 +43,6 @@ npm test
 npm run build
 ```
 
-### Mengaktifkan GitHub Pages
+### GitHub Pages
 
-Di repositori GitHub, buka **Settings → Pages → Build and deployment → Source** dan pilih **GitHub Actions**. Workflow di `.github/workflows/pages.yml` kemudian membangun dan memublikasikan web dari branch `main`.
+GitHub Pages menggunakan sumber **GitHub Actions**. Workflow di `.github/workflows/pages.yml` membangun dan memublikasikan web setiap ada push ke branch `main`. `vite.config.js` memakai path aset relatif agar situs bekerja di subpath `/RapihkanData/`.
