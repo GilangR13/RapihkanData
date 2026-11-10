@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import { RULES, transformCell } from './cleaner.js';
 import { cleanConfiguredText, splitNisNisn, splitBirthPlaceDate, parseCorrectionDictionary } from './indonesia.js';
-import { joinMergeValues, shiftedColumn } from './merge.js';
+import { shiftedColumn, groupColumns, finalMergeGroups, mergeGroupValue } from './merge.js';
 import './style.css';
 import './columns.css';
 
@@ -42,6 +42,7 @@ const state = {
   customCorrections: [],
   previewPage: 0,
   previewColumnPage: 0,
+  nextMergeId: 1,
 };
 const PREVIEW_PAGE_SIZE = 50;
 const PREVIEW_COLUMN_PAGE_SIZE = 20;
@@ -106,24 +107,42 @@ function mergeGroupsFor(sheetIndex) {
   return state.mergeGroups.get(sheetIndex);
 }
 function mergeError(sheetIndex, group, groupIndex) {
-  if (group.columns.length < 2) return 'Pilih minimal dua kolom.';
+  if (group.columns.length + group.groupIds.length < 2) return 'Pilih minimal dua sumber: kolom atau hasil gabungan sebelumnya.';
   if (group.columns.some(column => splitFor(sheetIndex, column) !== 'none')) return 'Kolom yang digabung tidak boleh sekaligus memakai aturan Pisahkan kolom.';
   const groups = mergeGroupsFor(sheetIndex);
   if (groups.some((other, index) => index !== groupIndex && other.columns.some(column => group.columns.includes(column)))) return 'Satu kolom hanya boleh masuk ke satu gabungan.';
+  for (const id of group.groupIds) {
+    const previousIndex = groups.findIndex(item => item.id === id);
+    if (previousIndex < 0 || previousIndex >= groupIndex) return 'Hasil gabungan harus berasal dari langkah sebelumnya.';
+    if (mergeError(sheetIndex, groups[previousIndex], previousIndex)) return `Gabungan ${previousIndex + 1} perlu dilengkapi lebih dulu.`;
+  }
+  return '';
+}
+function finalMergeError(sheetIndex) {
+  const groups = mergeGroupsFor(sheetIndex);
+  const ready = groups.filter((group, index) => !mergeError(sheetIndex, group, index));
+  const finals = finalMergeGroups(ready);
+  for (let index = 0; index < finals.length; index++) {
+    const firstColumns = groupColumns(finals[index], groups);
+    for (let other = index + 1; other < finals.length; other++) {
+      if (groupColumns(finals[other], groups).some(column => firstColumns.includes(column))) {
+        return 'Dua hasil akhir memakai kolom sumber yang sama. Satukan kedua hasil itu pada gabungan berikutnya.';
+      }
+    }
+  }
   return '';
 }
 function mergedCellText(cell) {
   if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) return cell.value.result == null ? '' : String(cell.value.result);
   return cellLabel(cell);
 }
-function mergedRowValue(sheet, sheetIndex, rowIndex, group) {
-  const values = group.columns.map(column => {
+function mergedRowValue(sheet, sheetIndex, rowIndex, group, groups) {
+  return mergeGroupValue(group, groups, column => {
     const cell = sheet.getRow(rowIndex).getCell(column);
     if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) return mergedCellText(cell);
     const transformed = transformConfiguredCell(cell.value, sheetIndex, column, rowIndex, cell.numFmt);
     return transformed.changed ? transformed.next : mergedCellText(cell);
   });
-  return joinMergeValues(values, group.separator);
 }
 function isHeaderRow(rowIndex) { return state.hasHeader && rowIndex === 1; }
 function splitHeaders(mode) {
@@ -141,6 +160,7 @@ function initializeColumnSettings(workbook) {
   state.regionColumns = new Map();
   state.splitColumns = new Map();
   state.mergeGroups = new Map();
+  state.nextMergeId = 1;
   workbook.worksheets.forEach((sheet, sheetIndex) => {
     const rules = [];
     const addresses = [];
@@ -275,7 +295,12 @@ function renderMergeGroups() {
     remove.type = 'button';
     remove.className = 'merge-remove';
     remove.textContent = 'Hapus gabungan';
-    remove.addEventListener('click', () => { groups.splice(groupIndex, 1); renderMergeGroups(); renderPreview(); });
+    remove.addEventListener('click', () => {
+      groups.splice(groupIndex, 1);
+      groups.forEach(other => { other.groupIds = other.groupIds.filter(id => id !== group.id); });
+      renderMergeGroups();
+      renderPreview();
+    });
     head.append(title, remove);
 
     const fields = document.createElement('div');
@@ -294,6 +319,22 @@ function renderMergeGroups() {
 
     const choices = document.createElement('div');
     choices.className = 'merge-columns';
+    groups.slice(0, groupIndex).forEach((previous, previousIndex) => {
+      const option = document.createElement('label');
+      option.className = 'merge-prior';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = group.groupIds.includes(previous.id);
+      checkbox.disabled = Boolean(mergeError(state.sheetIndex, previous, previousIndex));
+      checkbox.setAttribute('aria-label', `Gabungan ${groupIndex + 1}, hasil Gabungan ${previousIndex + 1}`);
+      checkbox.addEventListener('change', () => {
+        group.groupIds = checkbox.checked ? [...group.groupIds, previous.id] : group.groupIds.filter(id => id !== previous.id);
+        renderMergeGroups();
+        renderPreview();
+      });
+      option.append(checkbox, `Hasil Gabungan ${previousIndex + 1} · ${previous.header.trim() || 'Hasil gabungan'}`);
+      choices.append(option);
+    });
     for (let column = 1; column <= sheet.columnCount; column++) {
       const option = document.createElement('label');
       const checkbox = document.createElement('input');
@@ -311,6 +352,20 @@ function renderMergeGroups() {
     }
     const error = mergeError(state.sheetIndex, group, groupIndex);
     card.append(head, fields, choices);
+    const consumers = groups.flatMap((other, index) => other.groupIds.includes(group.id) ? [index + 1] : []);
+    if (consumers.length) {
+      const note = document.createElement('p');
+      note.className = 'merge-note';
+      note.textContent = `Hasil ini dipakai lagi pada Gabungan ${consumers.join(', ')}.`;
+      card.append(note);
+    }
+    const selectedResults = group.groupIds.map(id => groups.find(previous => previous.id === id)).filter(Boolean);
+    if (selectedResults.some((first, index) => selectedResults.slice(index + 1).some(second => groupColumns(first, groups).some(column => groupColumns(second, groups).includes(column))))) {
+      const note = document.createElement('p');
+      note.className = 'merge-warning';
+      note.textContent = 'Dua hasil yang dipilih memakai sumber yang sama; bagian tersebut akan muncul dua kali dalam gabungan ini.';
+      card.append(note);
+    }
     if (error) {
       const message = document.createElement('p');
       message.className = 'merge-error';
@@ -320,6 +375,13 @@ function renderMergeGroups() {
     fragment.append(card);
   });
   els.mergeList.replaceChildren(fragment);
+  const planError = finalMergeError(state.sheetIndex);
+  if (planError) {
+    const message = document.createElement('p');
+    message.className = 'merge-error';
+    message.textContent = planError;
+    els.mergeList.append(message);
+  }
 }
 
 function schedulePreview() {
@@ -333,13 +395,15 @@ function renderPreview() {
   state.previewPage = Math.min(state.previewPage, pageCount - 1);
   const firstRow = state.previewPage * PREVIEW_PAGE_SIZE + 1;
   const lastRow = Math.min(sheet.rowCount, firstRow + PREVIEW_PAGE_SIZE - 1);
-  const validGroups = mergeGroupsFor(state.sheetIndex).filter((group, index) => !mergeError(state.sheetIndex, group, index));
-  const mergedSources = new Map(validGroups.flatMap(group => group.columns.map(column => [column, group])));
+  const groups = mergeGroupsFor(state.sheetIndex);
+  const validGroups = groups.filter((group, index) => !mergeError(state.sheetIndex, group, index));
+  const finalGroups = finalMergeError(state.sheetIndex) ? [] : finalMergeGroups(validGroups);
+  const mergedSources = new Map(finalGroups.flatMap(group => groupColumns(group, groups).map(column => [column, group])));
   const allColumns = [];
   for (let column = 1; column <= Math.max(1, sheet.columnCount); column++) {
     const group = mergedSources.get(column);
     if (group) {
-      if (column === group.columns[0]) allColumns.push({ column, part: -1, mergeGroup: group, label: group.header.trim() || 'Hasil gabungan' });
+      if (column === groupColumns(group, groups)[0]) allColumns.push({ column, part: -1, mergeGroup: group, label: group.header.trim() || 'Hasil gabungan' });
       continue;
     }
     const mode = splitFor(state.sheetIndex, column);
@@ -375,10 +439,11 @@ function renderPreview() {
       const td = document.createElement('td');
       const original = cellLabel(cell);
       if (column.mergeGroup) {
-        const originalValues = column.mergeGroup.columns.map(source => cellLabel(sheet.getRow(rowIndex).getCell(source)));
-        td.textContent = isHeaderRow(rowIndex) ? column.label : mergedRowValue(sheet, state.sheetIndex, rowIndex, column.mergeGroup);
+        const sourceColumns = groupColumns(column.mergeGroup, groups);
+        const originalValues = sourceColumns.map(source => cellLabel(sheet.getRow(rowIndex).getCell(source)));
+        td.textContent = isHeaderRow(rowIndex) ? column.label : mergedRowValue(sheet, state.sheetIndex, rowIndex, column.mergeGroup, groups);
         if (!isHeaderRow(rowIndex) && originalValues.some(Boolean)) {
-          const formula = column.mergeGroup.columns.some(source => {
+          const formula = sourceColumns.some(source => {
             const value = sheet.getRow(rowIndex).getCell(source).value;
             return value && typeof value === 'object' && 'formula' in value;
           });
@@ -480,6 +545,11 @@ async function exportFiles() {
         return;
       }
     }
+    const planError = finalMergeError(sheetIndex);
+    if (planError) {
+      setStatus(`Lembar ${state.workbook.worksheets[sheetIndex].name}: ${planError}`, true);
+      return;
+    }
   }
   els.export.disabled = true;
   setStatus('Menyiapkan file ODS…');
@@ -506,21 +576,25 @@ async function exportFiles() {
         });
       });
       const groups = mergeGroupsFor(sheetIndex);
-      for (const group of groups) {
-        const anchor = group.columns[0];
+      const outputs = finalMergeGroups(groups).map(group => ({
+        group,
+        columns: groupColumns(group, groups),
+        values: Array.from({ length: sheet.rowCount }, (_, index) => {
+          const rowIndex = index + 1;
+          return isHeaderRow(rowIndex) ? group.header.trim() || 'Hasil gabungan' : mergeGroupValue(group, groups, column => mergedCellText(sheet.getRow(rowIndex).getCell(column)));
+        }),
+      }));
+      for (const { columns, values } of outputs) {
+        const anchor = columns[0];
         for (let rowIndex = 1; rowIndex <= sheet.rowCount; rowIndex++) {
           const target = sheet.getRow(rowIndex).getCell(anchor);
-          if (isHeaderRow(rowIndex)) {
-            target.value = group.header.trim() || 'Hasil gabungan';
-          } else {
-            const joined = joinMergeValues(group.columns.map(column => mergedCellText(sheet.getRow(rowIndex).getCell(column))), group.separator);
-            if (joined) changedCount++;
-            target.value = joined;
-            target.numFmt = '@';
-          }
+          const joined = values[rowIndex - 1];
+          if (!isHeaderRow(rowIndex) && joined) changedCount++;
+          target.value = joined;
+          target.numFmt = '@';
         }
       }
-      const removedColumns = groups.flatMap(group => group.columns.slice(1)).sort((a, b) => b - a);
+      const removedColumns = [...new Set(outputs.flatMap(output => output.columns.slice(1)))].sort((a, b) => b - a);
       for (const column of removedColumns) sheet.spliceColumns(column, 1);
       for (let column = originalColumnCount; column >= 1; column--) {
         const mode = splitFor(sheetIndex, column);
@@ -571,7 +645,7 @@ els.sheet.addEventListener('change', () => { state.sheetIndex = Number(els.sheet
 els.header.addEventListener('change', () => { state.hasHeader = els.header.checked; state.previewPage = 0; state.previewColumnPage = 0; renderRules(); renderPreview(); });
 els.addMerge.addEventListener('click', () => {
   const groups = mergeGroupsFor(state.sheetIndex);
-  groups.push({ columns: [], separator: ', ', header: `Gabungan ${groups.length + 1}` });
+  groups.push({ id: state.nextMergeId++, columns: [], groupIds: [], separator: ', ', header: `Gabungan ${groups.length + 1}` });
   renderMergeGroups();
   renderPreview();
 });
