@@ -193,29 +193,28 @@ async function handleFile(file) {
   }
 }
 
-function buildReport(rows, sourceName, warningCount) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'RapihkanData';
-  const summary = workbook.addWorksheet('Ringkasan');
-  summary.addRows([
-    ['Laporan RapihkanData', ''],
-    ['File sumber', sourceName],
-    ['Sel berubah', rows.filter(row => row[2] === 'Diubah').length],
-    ['Peringatan', warningCount],
-    ['Catatan', 'File asli tidak diubah. Nilai yang sudah kehilangan nol awal sebelum dibaca tidak bisa dipulihkan tanpa acuan.'],
-  ]);
-  summary.getColumn(1).width = 24;
-  summary.getColumn(2).width = 85;
-  summary.getRow(1).font = { bold: true, size: 15, color: { argb: 'FF1D6044' } };
-  const detail = workbook.addWorksheet('Rincian');
-  detail.addRow(['Lembar', 'Sel', 'Status', 'Nilai awal', 'Nilai hasil', 'Keterangan']);
-  rows.forEach(row => detail.addRow(row));
-  [22, 12, 18, 48, 48, 55].forEach((width, index) => { detail.getColumn(index + 1).width = width; });
-  detail.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  detail.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D6044' } };
-  detail.views = [{ state: 'frozen', ySplit: 1 }];
-  detail.autoFilter = { from: 'A1', to: 'F1' };
-  return workbook;
+function buildTextReport(rows, sourceName, warningCount) {
+  const changedCount = rows.filter(row => row[2] === 'Diubah').length;
+  const lines = [
+    'LAPORAN RAPIHKANDATA',
+    `File sumber : ${sourceName}`,
+    `Sel diubah  : ${changedCount}`,
+    `Peringatan : ${warningCount}`,
+    '',
+    'File asli tidak diubah. Nilai yang sudah kehilangan nol awal sebelum dibaca tidak dapat dipulihkan tanpa acuan.',
+    '',
+    'RINCIAN',
+  ];
+  if (!rows.length) lines.push('Tidak ada perubahan atau peringatan.');
+  rows.forEach(([sheet, address, status, before, after, reason], index) => {
+    lines.push('', `${index + 1}. [${status}] ${sheet}${address ? `!${address}` : ''}`);
+    if (status === 'Diubah') {
+      lines.push(`   Sebelum : ${JSON.stringify(String(before))}`);
+      lines.push(`   Sesudah : ${JSON.stringify(String(after))}`);
+    }
+    lines.push(`   Catatan : ${reason}`);
+  });
+  return '\uFEFF' + lines.join('\r\n') + '\r\n';
 }
 
 function downloadBlob(blob, filename) {
@@ -258,12 +257,13 @@ async function exportFiles() {
       });
     }
     warnings.forEach(message => rows.push(['File sumber', '', 'Peringatan', '', '', message]));
-    const report = buildReport(rows, state.file.name, warningCount);
-    const [cleanBuffer, reportBuffer] = await Promise.all([workbook.xlsx.writeBuffer(), report.xlsx.writeBuffer()]);
+    const { excelWorkbookToOds } = await import('./ods.js');
+    const cleanBuffer = excelWorkbookToOds(workbook);
+    const reportText = buildTextReport(rows, state.file.name, warningCount);
     const base = state.file.name.replace(/\.(xlsx|ods|csv)$/i, '').replace(/[\\/:*?"<>|]/g, '_');
     const zip = new JSZip();
-    zip.file(`${base}_rapi.xlsx`, cleanBuffer);
-    zip.file(`${base}_laporan.xlsx`, reportBuffer);
+    zip.file(`${base}_rapi.ods`, cleanBuffer);
+    zip.file(`${base}_laporan.txt`, reportText);
     downloadBlob(await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }), `${base}_hasil.zip`);
     const changedCount = rows.filter(row => row[2] === 'Diubah').length;
     setStatus(`Selesai. ${changedCount} perubahan dan ${warningCount} peringatan tercatat dalam ZIP.`);

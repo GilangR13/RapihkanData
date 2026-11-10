@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import ExcelJS from 'exceljs';
-import { odsToExcelWorkbook } from './ods.js';
+import { read } from 'xlsx';
+import { odsToExcelWorkbook, excelWorkbookToOds } from './ods.js';
 
 test('membaca ODS LibreOffice dengan dua lembar, nol awal, dan rumus', async () => {
   const fixture = readFileSync(new URL('../test/fixtures/sample.ods', import.meta.url));
@@ -13,8 +13,11 @@ test('membaca ODS LibreOffice dengan dua lembar, nol awal, dan rumus', async () 
   assert.equal(workbook.getWorksheet('Alamat').getCell('B2').value, '0812345');
   assert.deepEqual(workbook.getWorksheet('Peserta').getCell('C2').value, { formula: '1+2', result: 3 });
 
-  const output = new ExcelJS.Workbook();
-  await output.xlsx.load(await workbook.xlsx.writeBuffer());
-  assert.equal(output.getWorksheet('Peserta').getCell('B2').value, '00127');
-  assert.equal(output.getWorksheet('Peserta').getCell('B2').numFmt, '@');
+  const output = read(excelWorkbookToOds(workbook), { type: 'array' });
+  assert.deepEqual(output.SheetNames, ['Peserta', 'Alamat']);
+  assert.equal(output.Sheets.Peserta.B2.v, '00127');
+  assert.equal(output.Sheets.Peserta.B2.t, 's');
+  assert.equal(output.Sheets.Alamat.B2.v, '0812345');
+  assert.equal(output.Sheets.Alamat.B2.t, 's');
+  assert.equal(output.Sheets.Peserta.C2.f, '1+2');
 });
