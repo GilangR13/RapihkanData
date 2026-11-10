@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#173d35" />
+    <meta name="description" content="Rapikan data Excel dan CSV konsumen, tinjau perubahan, lalu unduh file hasil dan laporan." />
+    <title>RapihkanData — Perapih data konsumen</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#atas" aria-label="RapihkanData, kembali ke atas"><span class="brand-mark">R<span>.</span></span><span>RapihkanData</span></a>
+      <span class="topbar-note">Alat kerja data konsumen</span>
+    </header>
+
+    <main id="atas">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-dot"></span> Excel & CSV · Langsung di browser</div>
+          <h1 id="hero-title">Data dari konsumen,<br /><em>lebih siap dikerjakan.</em></h1>
+          <p>Rapikan isi file, tinjau perubahan per kolom, lalu unduh data hasil dan laporan dalam satu ZIP. File asli tetap utuh.</p>
+          <div class="hero-points"><span>01 · Pilih file</span><span>02 · Atur kolom</span><span>03 · Unduh hasil</span></div>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="visual-sheet"><div class="visual-sheet-head"><i></i><i></i><i></i><span>DATA KONSUMEN</span></div><div class="visual-grid"><span>Nama</span><span>Alamat</span><span>Kode</span><span class="visual-muted">  ANI  PUTRI  </span><span class="visual-muted"> JL.  MELATI  7 </span><span>00127</span><span class="visual-good">Ani Putri</span><span class="visual-good">Jl. Melati 7</span><span class="visual-good">00127</span></div><div class="visual-tag">✓ siap ditinjau</div></div>
+        </div>
+      </section>
+
+      <section class="workspace" aria-labelledby="workspace-title">
+        <div class="section-heading"><div><p class="section-kicker">MULAI DI SINI</p><h2 id="workspace-title">Rapikan file Anda</h2></div><p>Pilih satu file Excel (.xlsx) atau CSV. Seluruh proses berlangsung di browser Anda.</p></div>
+        <div class="upload-card" id="dropzone" role="button" tabindex="0" aria-label="Pilih file Excel atau CSV">
+          <input id="file-input" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+          <span class="upload-icon" aria-hidden="true">↑</span>
+          <strong>Tarik file ke sini atau klik untuk memilih</strong>
+          <span>Excel .xlsx atau CSV · satu file setiap proses</span>
+        </div>
+        <div class="privacy-note"><span aria-hidden="true">✦</span><p><strong>Data tetap di perangkat.</strong> File tidak diunggah ke server. Jangan masukkan data konsumen ke repositori GitHub.</p></div>
+
+        <div id="editor" class="editor hidden" aria-live="polite">
+          <div class="file-strip"><div class="file-icon">X</div><div class="file-meta"><strong id="file-name"></strong><span id="file-details"></span></div><button id="replace-file" class="text-button" type="button">Ganti file</button></div>
+          <div class="controls-row"><div class="field"><label for="sheet-select">Lembar yang ditinjau</label><select id="sheet-select"></select></div><label class="check-field"><input id="header-checkbox" type="checkbox" checked /><span>Baris pertama adalah judul kolom</span></label></div>
+          <div class="editor-heading"><div><p class="section-kicker">ATURAN PER KOLOM</p><h3>Pilih cara merapikan teks</h3></div><p>Default: rapikan spasi. Aturan huruf hanya diterapkan bila Anda memilihnya.</p></div>
+          <div id="rule-list" class="rule-list"></div>
+          <div class="preview-heading"><div><p class="section-kicker">PRATINJAU</p><h3>Periksa hasil sebelum mengunduh</h3></div><span id="preview-count" class="count-pill"></span></div>
+          <div class="table-scroll"><table id="preview-table"><thead></thead><tbody></tbody></table></div>
+          <p id="preview-note" class="muted-note"></p>
+          <div class="export-panel"><div><strong>Siap membuat hasil?</strong><p>ZIP berisi file data rapi (.xlsx) dan laporan perubahan (.xlsx). Semua lembar diproses.</p></div><button id="export-button" class="primary-button" type="button">Unduh hasil & laporan <span aria-hidden="true">↗</span></button></div>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="how-it-works" aria-labelledby="how-title"><div><p class="section-kicker">CARA KERJA</p><h2 id="how-title">Rapi, dengan kendali di tangan Anda.</h2></div><div class="feature-grid"><article><span>01</span><h3>Semua kolom diperiksa</h3><p>Spasi berlebih dibersihkan. Angka dan tanggal tetap pada tipenya, kecuali angka yang tampil dengan nol di depan.</p></article><article><span>02</span><h3>Nol awal dijaga</h3><p>Nilai seperti 00127 disimpan sebagai teks. Format angka Excel 00000 juga dibaca menjadi teks 00127.</p></article><article><span>03</span><h3>Perubahan tercatat</h3><p>Laporan memuat lembar, sel, nilai awal, nilai hasil, dan alasan. Rumus dibiarkan serta dicatat.</p></article></div></section>
+    </main>
+    <footer><span>RapihkanData</span><span>Untuk menyiapkan data konsumen sebelum produksi.</span></footer>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
