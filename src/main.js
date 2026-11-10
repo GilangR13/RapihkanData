@@ -35,10 +35,15 @@ function fileSize(size) {
 }
 
 async function readFile(file) {
-  const workbook = new ExcelJS.Workbook();
+  let workbook = new ExcelJS.Workbook();
   const warnings = [];
   if (/\.xlsx$/i.test(file.name)) {
     await workbook.xlsx.load(await file.arrayBuffer());
+  } else if (/\.ods$/i.test(file.name)) {
+    const { odsToExcelWorkbook } = await import('./ods.js');
+    const converted = odsToExcelWorkbook(await file.arrayBuffer());
+    workbook = converted.workbook;
+    warnings.push(...converted.warnings);
   } else if (/\.csv$/i.test(file.name)) {
     const content = (await file.text()).replace(/^\uFEFF/, '');
     const parsed = Papa.parse(content, { skipEmptyLines: false, dynamicTyping: false });
@@ -49,7 +54,7 @@ async function readFile(file) {
     while (data.length && data[data.length - 1].every(value => value === '')) data.pop();
     data.forEach(row => sheet.addRow(row));
   } else {
-    throw new Error('Pilih file .xlsx atau .csv.');
+    throw new Error('Pilih file .xlsx, .ods, atau .csv.');
   }
   if (!workbook.worksheets.length) throw new Error('File tidak berisi lembar data.');
   return { workbook, warnings };
@@ -252,10 +257,10 @@ async function exportFiles() {
         });
       });
     }
-    warnings.forEach(message => rows.push(['CSV', '', 'Peringatan', '', '', message]));
+    warnings.forEach(message => rows.push(['File sumber', '', 'Peringatan', '', '', message]));
     const report = buildReport(rows, state.file.name, warningCount);
     const [cleanBuffer, reportBuffer] = await Promise.all([workbook.xlsx.writeBuffer(), report.xlsx.writeBuffer()]);
-    const base = state.file.name.replace(/\.(xlsx|csv)$/i, '').replace(/[\\/:*?"<>|]/g, '_');
+    const base = state.file.name.replace(/\.(xlsx|ods|csv)$/i, '').replace(/[\\/:*?"<>|]/g, '_');
     const zip = new JSZip();
     zip.file(`${base}_rapi.xlsx`, cleanBuffer);
     zip.file(`${base}_laporan.xlsx`, reportBuffer);
